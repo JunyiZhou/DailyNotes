@@ -1,9 +1,31 @@
 # Android Notes
 ##  Android
 1.  四大组件是什么与它们的生命周期（及Fragment）。
+    * Activity  
+    ![](./img/lifecycle_activity.jpg)
+    * Service  
+    ![](./img/lifecycle_service.jpg)
+    * BroadcastReceiver
+    * ContentProvider
+    * Fragment  
+    ![](./img/lifecycle_fragment.png)
+    ![](./img/lifecycle_fragment_with_activity.png)
 2.  Acitivty的四种启动模式与特点。
+    * standard
+    * singleTop
+    * singleTask
+    * singleInstance
 3.  Activity状态保存与恢复。
 4.  Service的生命周期，启动方法，有什么区别。
+    * startService  
+      onCreate()  
+      onStartCommand()  
+      onDestroy()  
+    * bindService  
+      onCreate()  
+      onBind()  
+      onUnbind()  
+      onDestroy()  
 5.  service和activity怎么进行数据交互。
 6.  怎么保证service不被杀死。
 7.  广播使用的方式和场景以及广播的几种分类。
