@@ -276,6 +276,8 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
     ProviderInfo cpi = null;
     synchronized(this) {
         long startTime = SystemClock.uptimeMillis();
+
+        // check 一下 caller 是否存在，不存在要报安全异常
         ProcessRecord r = null;
         if (caller != null) {
             r = getRecordForAppLocked(caller);
@@ -287,18 +289,27 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
             }
         }
         boolean checkCrossUser = true;
+        // 这个方法很有意思，逻辑上看是 check (当前时间 - startTime > 50ms)，如果超过了，
+        // 则打出一条讽刺性的 log 。。。目的是让自己羞愧？
         checkTime(startTime, "getContentProviderImpl: getProviderByName");
         // First check if this content provider has been published...
+        // 先检查 ContentProvider 是否被 published
+        // Q1：published 表示啥
         cpr = mProviderMap.getProviderByName(name, userId);
         // If that didn't work, check if it exists for user 0 and then
         // verify that it's a singleton provider before using it.
+        // 如果没找到且 userId 不是 USER_SYSTEM 的话，再以 USER_SYSTEM 这个 userId 从
+        // mProviderMap 中查找一次 cpr
         if (cpr == null && userId != UserHandle.USER_SYSTEM) {
             cpr = mProviderMap.getProviderByName(name, UserHandle.USER_SYSTEM);
+            // check 一下 cpr 这次是否获取到
             if (cpr != null) {
                 cpi = cpr.info;
+                // check 是否是 singleton
                 if (isSingleton(cpi.processName, cpi.applicationInfo,
                         cpi.name, cpi.flags)
                         && isValidSingletonCall(r.uid, cpi.applicationInfo.uid)) {
+                    // 如果满足条件，强制将 userId 转成 USER_SYSTEM
                     userId = UserHandle.USER_SYSTEM;
                     checkCrossUser = false;
                 } else {
@@ -307,6 +318,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
                 }
             }
         }
+        // check provider 是否还在 running
         boolean providerRunning = cpr != null && cpr.proc != null && !cpr.proc.killed;
         if (providerRunning) {
             cpi = cpr.info;
