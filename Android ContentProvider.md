@@ -329,6 +329,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
                 throw new SecurityException(msg);
             }
             checkTime(startTime, "getContentProviderImpl: after checkContentProviderPermission");
+            // 如果 provider 可以在 caller 直接运行，那么也不用建立连接，直接让 caller 自己实例化一个实例
             if (r != null && cpr.canRunHere(r)) {
                 // This provider has been published or is in the process
                 // of being published...  but it is also allowed to run
@@ -352,7 +353,9 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
             checkTime(startTime, "getContentProviderImpl: incProviderCountLocked");
             // In this case the provider instance already exists, so we can
             // return it right away.
+            // 增加引用
             conn = incProviderCountLocked(r, cpr, token, stable);
+            // 如果 stable 和 unstable 总引用数为 1，且 caller 进程是 perceptible 的，updateLruProcessLocked
             if (conn != null && (conn.stableCount+conn.unstableCount) == 1) {
                 if (cpr.proc != null && r.setAdj <= ProcessList.PERCEPTIBLE_APP_ADJ) {
                     // If this is a perceptible app accessing the provider,
@@ -366,6 +369,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
             }
             checkTime(startTime, "getContentProviderImpl: before updateOomAdj");
             final int verifiedAdj = cpr.proc.verifiedAdj;
+            // 更新 provider 进程的 adj
             boolean success = updateOomAdjLocked(cpr.proc, true);
             // XXX things have changed so updateOomAdjLocked doesn't actually tell us
             // if the process has been successfully adjusted.  So to reduce races with
@@ -382,6 +386,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
             // pending on the process even though we managed to update its
             // adj level.  Not sure what to do about this, but at least
             // the race is now smaller.
+            // 如果不成功，则减少引用计数并杀死 provider 进程
             if (!success) {
                 // Uh oh...  it looks like the provider's process
                 // has been killed on us.  We need to wait for a new
@@ -405,15 +410,18 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
             }
             Binder.restoreCallingIdentity(origId);
         }
+        // 如果 provider 没有正在运行
         if (!providerRunning) {
             try {
                 checkTime(startTime, "getContentProviderImpl: before resolveContentProvider");
+                // 获取 providerInfo
                 cpi = AppGlobals.getPackageManager().
                     resolveContentProvider(name,
                         STOCK_PM_FLAGS | PackageManager.GET_URI_PERMISSION_PATTERNS, userId);
                 checkTime(startTime, "getContentProviderImpl: after resolveContentProvider");
             } catch (RemoteException ex) {
             }
+            // 如果没获取到，说明没有找的这个 provider，直接返回空给  client
             if (cpi == null) {
                 return null;
             }
@@ -421,6 +429,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
             // (it's a call within the same user || the provider is a
             // privileged app)
             // Then allow connecting to the singleton provider
+            // 检查 provider 是否是单例，如果是单例则将 userId 转成 USER_SYSTEM
             boolean singleton = isSingleton(cpi.processName, cpi.applicationInfo,
                     cpi.name, cpi.flags)
                     && isValidSingletonCall(r.uid, cpi.applicationInfo.uid);
@@ -446,6 +455,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
             }
             // Make sure that the user who owns this provider is running.  If not,
             // we don't want to allow it to run.
+            // check 一下 provider 的 user 是否 running，如果没有就返回 null，这里 check 的是用户而不是进程
             if (!mUserController.isUserRunningLocked(userId, 0)) {
                 Slog.w(TAG, "Unable to launch app "
                         + cpi.applicationInfo.packageName + "/"
@@ -458,6 +468,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
             cpr = mProviderMap.getProviderByClass(comp, userId);
             checkTime(startTime, "getContentProviderImpl: after getProviderByClass");
             final boolean firstClass = cpr == null;
+            // 该 provider 是否是第一次被创建，其实就是在缓存中找不到记录
             if (firstClass) {
                 final long ident = Binder.clearCallingIdentity();
                 // If permissions need a review before any of the app components can run,
@@ -482,6 +493,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
                         return null;
                     }
                     ai = getAppInfoForUser(ai, userId);
+                    // 创建一个 cpr
                     cpr = new ContentProviderRecord(this, cpi, ai, comp, singleton);
                 } catch (RemoteException ex) {
                     // pm is in same process, this will never happen.
@@ -490,6 +502,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
                 }
             }
             checkTime(startTime, "getContentProviderImpl: now have ContentProviderRecord");
+            // 如果 provider 可以在 caller 直接运行，那么也不用建立连接，直接让 caller 自己实例化一个实例
             if (r != null && cpr.canRunHere(r)) {
                 // If this is a multiprocess provider, then just return its
                 // info and allow the caller to instantiate it.  Only do
@@ -503,6 +516,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
             // This is single process, and our app is now connecting to it.
             // See if we are already in the process of launching this
             // provider.
+            // provider 的所有者一个单进程，我们的 app 正常连接它，检查一下它是否已经准备好了
             final int N = mLaunchingProviders.size();
             int i;
             for (i = 0; i < N; i++) {
@@ -512,6 +526,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
             }
             // If the provider is not already being launched, then get it
             // started.
+            // 如果没准备好，需要进行准备
             if (i >= N) {
                 final long origId = Binder.clearCallingIdentity();
                 try {
@@ -528,8 +543,10 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
                     }
                     // Use existing process if already started
                     checkTime(startTime, "getContentProviderImpl: looking for process record");
+                    // 获取运行 provider 的进程
                     ProcessRecord proc = getProcessRecordLocked(
                             cpi.processName, cpr.appInfo.uid, false);
+                    // 如果进程已经启动，则通过 binder 让这个进程创建 provider
                     if (proc != null && proc.thread != null && !proc.killed) {
                         if (DEBUG_PROVIDER) Slog.d(TAG_PROVIDER,
                                 "Installing in existing process " + proc);
@@ -542,12 +559,14 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
                             }
                         }
                     } else {
+                        // 如果进程没启动，则启动这个进程，进程启动完毕，创建 provider 的操作将会在 AndroidThread 初始化时进行
                         checkTime(startTime, "getContentProviderImpl: before start process");
                         proc = startProcessLocked(cpi.processName,
                                 cpr.appInfo, false, 0, "content provider",
                                 new ComponentName(cpi.applicationInfo.packageName,
                                         cpi.name), false, false, false);
                         checkTime(startTime, "getContentProviderImpl: after start process");
+                        // 进程没创建成功，直接返回 null 给 client
                         if (proc == null) {
                             Slog.w(TAG, "Unable to launch app "
                                     + cpi.applicationInfo.packageName + "/"
@@ -565,10 +584,12 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
             checkTime(startTime, "getContentProviderImpl: updating data structures");
             // Make sure the provider is published (the same provider class
             // may be published under multiple names).
+            // 如果第一次创建这个 provider 实例，在 mProviderMap 中进行缓存
             if (firstClass) {
                 mProviderMap.putProviderByClass(comp, cpr);
             }
             mProviderMap.putProviderByName(name, cpr);
+            // 增加引用
             conn = incProviderCountLocked(r, cpr, token, stable);
             if (conn != null) {
                 conn.waiting = true;
@@ -579,6 +600,7 @@ private ContentProviderHolder getContentProviderImpl(IApplicationThread caller,
                 cpi.applicationInfo.uid, UserHandle.getAppId(Binder.getCallingUid()));
     }
     // Wait for the provider to be published...
+    // 等待 APP 进程实例化 provider 完成
     synchronized (cpr) {
         while (cpr.provider == null) {
             if (cpr.launchingApp == null) {
